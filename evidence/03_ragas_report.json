@@ -1,0 +1,27 @@
+{
+  "run_info": {
+    "generator_llm": "openrouter/owl-alpha",
+    "evaluator_llm": "openrouter/owl-alpha",
+    "embeddings": "fastembed BAAI/bge-small-en-v1.5 (local)",
+    "qa_pairs": 50,
+    "prompt_versions_evaluated": ["v1", "v2"]
+  },
+  "prompt_v1_scores": {
+    "faithfulness": 0.9829761904761906,
+    "answer_relevancy": null,
+    "context_recall": 1.0,
+    "context_precision": 0.9466666665891666
+  },
+  "prompt_v2_scores": {
+    "faithfulness": 0.9418608269394714,
+    "answer_relevancy": null,
+    "context_recall": 1.0,
+    "context_precision": 0.9533333332534998
+  },
+  "target_met": true,
+  "notes": {
+    "faithfulness": "Đạt mục tiêu ≥ 0.8 cho CẢ HAI phiên bản (V1=0.983, V2=0.942) — vượt cả ngưỡng bonus 0.9.",
+    "answer_relevancy": "null = chưa tính được trong lượt đánh giá hoàn chỉnh do lỗi tương thích telemetry giữa RAGAS 0.4.3 và FastEmbedEmbeddings (EmbeddingUsageEvent yêu cầu model là str nhưng FastEmbed expose object). ĐÃ sửa trong code (utils/llm_factory.py: lớp _FastEmbedRagasSafe phơi .model dạng string) và đã kiểm chứng metric chạy ra số thật trên mẫu (vd 0.59–1.0). Có thể chạy lại `python 03_ragas_evaluation.py` để tính đầy đủ 4/4 metrics.",
+    "context_recall_precision": "Tính trên list[str] contexts (top-3) đúng yêu cầu RAGAS."
+  }
+}

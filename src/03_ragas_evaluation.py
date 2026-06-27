@@ -30,21 +30,37 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from ragas import evaluate, EvaluationDataset, SingleTurnSample
 from ragas.metrics import faithfulness, answer_relevancy, context_recall, context_precision
+try:
+    from ragas.run_config import RunConfig
+except ImportError:
+    from ragas import RunConfig
 
 from utils.llm_factory import get_llm, get_embeddings
 from utils.data_loader import load_knowledge_base, split_text, build_vectorstore
 from qa_pairs import QA_PAIRS
 
 
-# ── 1. Prompt Templates (copy từ Bước 2) ──────────────────────────────────
-# TODO: Copy SYSTEM_V1 và SYSTEM_V2 mà bạn đã viết ở file 02_prompt_hub_ab_routing.py
-SYSTEM_V1 = ...
+# ── 1. Prompt Templates (copy từ Bước 2 — phải GIỐNG HỆT để so sánh được) ──
+# V1 — phong cách ngắn gọn, súc tích (2-4 câu)
+SYSTEM_V1 = (
+    "Bạn là trợ lý AI hữu ích. Chỉ dùng context sau để trả lời. "
+    "Giữ câu trả lời NGẮN GỌN, súc tích (2-4 câu), đi thẳng vào trọng tâm, "
+    "không lan man. Nếu context không chứa thông tin, hãy nói rõ là bạn không biết.\n\n"
+    "Context:\n{context}"
+)
 PROMPT_V1 = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_V1),
     ("human",  "{question}"),
 ])
 
-SYSTEM_V2 = ...
+# V2 — phong cách có cấu trúc, giọng chuyên gia (3-5 câu)
+SYSTEM_V2 = (
+    "Bạn là chuyên gia AI giàu kinh nghiệm. Hãy đọc kỹ context, xác định các facts "
+    "liên quan, rồi viết câu trả lời RÕ RÀNG, CÓ TỔ CHỨC và đầy đủ (3-5 câu). "
+    "Trình bày mạch lạc, giải thích ngắn gọn lý do dựa trên context, và chỉ dùng "
+    "thông tin có trong context. Nếu context không đủ thông tin, hãy nêu rõ điều đó.\n\n"
+    "Context:\n{context}"
+)
 PROMPT_V2 = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_V2),
     ("human",  "{question}"),
@@ -63,33 +79,42 @@ def setup_vectorstore():
 
 
 # ── 3. Chạy RAG và thu thập kết quả ───────────────────────────────────────
-def run_rag(retriever, llm, prompt, question: str) -> dict:
+def run_rag(retriever, llm, prompt, question: str, max_retries: int = 5) -> dict:
     """
-    Chạy RAG chain cho 1 câu hỏi.
+    Chạy RAG chain cho 1 câu hỏi (có retry chống lỗi tạm thời như 502/timeout).
 
     ⚠️ QUAN TRỌNG: trả về contexts là LIST of strings, KHÔNG phải string đã ghép!
     RAGAS cần từng đoạn riêng để tính context_recall và context_precision.
 
     Trả về: {"answer": str, "contexts": list[str]}
     """
-    # TODO: Retrieve documents từ retriever
-    docs = ...
+    import time
 
-    # TODO: Tạo contexts là danh sách page_content (KHÔNG ghép chuỗi ở đây)
-    # Gợi ý: contexts = [doc.page_content for doc in docs]
-    contexts = ...   # phải là list[str] !
+    # Retrieve documents từ retriever
+    docs = retriever.invoke(question)
 
-    # TODO: Ghép contexts thành 1 string để truyền vào {context} của prompt
+    # contexts là danh sách page_content (KHÔNG ghép chuỗi ở đây)
+    contexts = [doc.page_content for doc in docs]   # phải là list[str] !
+
+    # Ghép contexts thành 1 string để truyền vào {context} của prompt
     ctx_str = "\n\n".join(contexts)
 
-    # TODO: Chạy chain (prompt | llm | StrOutputParser()).invoke(...)
-    answer = (prompt | llm | StrOutputParser()).invoke({
-        "context":  ...,
-        "question": ...,
-    })
+    # Chạy chain với retry + exponential backoff (chống 502/timeout tạm thời)
+    chain = prompt | llm | StrOutputParser()
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            answer = chain.invoke({"context": ctx_str, "question": question})
+            return {"answer": answer, "contexts": contexts}
+        except Exception as e:
+            last_err = e
+            wait = min(2 ** attempt, 30)
+            print(f"    ⚠️  Lỗi LLM (thử lại {attempt + 1}/{max_retries} sau {wait}s): {str(e)[:90]}")
+            time.sleep(wait)
 
-    # TODO: Trả về dict với answer và contexts (list)
-    return {"answer": ..., "contexts": ...}
+    # Hết retry → trả answer rỗng để KHÔNG làm sập cả batch (câu này sẽ điểm thấp)
+    print(f"    ❌ Bỏ qua câu sau {max_retries} lần lỗi: {str(last_err)[:90]}")
+    return {"answer": "", "contexts": contexts}
 
 
 def collect_rag_outputs(vectorstore, prompt_version: str) -> list:
@@ -105,15 +130,15 @@ def collect_rag_outputs(vectorstore, prompt_version: str) -> list:
     print(f"\n🚀 Đang chạy 50 câu hỏi với prompt {prompt_version} ...")
 
     for i, qa in enumerate(QA_PAIRS, 1):
-        # TODO: Gọi run_rag() cho câu hỏi hiện tại
-        out = ...
+        # Gọi run_rag() cho câu hỏi hiện tại
+        out = run_rag(retriever, llm, prompt, qa["question"])
 
-        # TODO: Append vào results dict với 4 keys
+        # Append vào results dict với 4 keys
         results.append({
             "question":  qa["question"],
             "reference": qa["reference"],
-            "answer":    ...,        # out["answer"]
-            "contexts":  ...,        # out["contexts"] — phải là list[str] !
+            "answer":    out["answer"],
+            "contexts":  out["contexts"],   # phải là list[str] !
         })
         print(f"  [{i:02d}/50] {qa['question'][:60]}")
 
@@ -131,18 +156,18 @@ def build_ragas_dataset(rag_results: list) -> EvaluationDataset:
       retrieved_contexts → list[str] các đoạn đã retrieve
       reference          → đáp án chuẩn (ground truth)
     """
-    # TODO: Tạo list các SingleTurnSample từ rag_results
+    # Tạo list các SingleTurnSample từ rag_results
     samples = [
         SingleTurnSample(
-            user_input=...,           # r["question"]
-            response=...,             # r["answer"]
-            retrieved_contexts=...,   # r["contexts"]
-            reference=...,            # r["reference"]
+            user_input=r["question"],
+            response=r["answer"],
+            retrieved_contexts=r["contexts"],
+            reference=r["reference"],
         )
         for r in rag_results
     ]
 
-    # TODO: Wrap thành EvaluationDataset và trả về
+    # Wrap thành EvaluationDataset và trả về
     return EvaluationDataset(samples=samples)
 
 
@@ -156,26 +181,21 @@ def run_ragas_eval(rag_results: list, version: str) -> dict:
     """
     print(f"\n📐 Đang đánh giá RAGAS cho prompt {version} ... (vui lòng chờ ~5-10 phút)")
 
-    # TODO: Tạo EvaluationDataset từ rag_results
-    dataset = ...
+    # Tạo EvaluationDataset từ rag_results
+    dataset = build_ragas_dataset(rag_results)
 
     # LLM và Embeddings riêng để RAGAS dùng làm evaluator
     llm_eval = get_llm(temperature=0)
     emb_eval = get_embeddings()
 
-    # TODO: Gọi evaluate() với đầy đủ 4 metrics
-    # Gợi ý:
-    #   result = evaluate(
-    #       dataset,
-    #       metrics=[faithfulness, answer_relevancy, context_recall, context_precision],
-    #       llm=llm_eval,
-    #       embeddings=emb_eval,
-    #   )
+    # Gọi evaluate() với đầy đủ 4 metrics
+    # run_config: timeout cao + ít worker → chống TimeoutError khi LLM local (Ollama) chậm
     result = evaluate(
-        ...,
-        metrics=[...],
-        llm=...,
-        embeddings=...,
+        dataset,
+        metrics=[faithfulness, answer_relevancy, context_recall, context_precision],
+        llm=llm_eval,
+        embeddings=emb_eval,
+        run_config=RunConfig(timeout=900, max_workers=4),
     )
 
     # Tính mean score cho mỗi metric
@@ -183,7 +203,9 @@ def run_ragas_eval(rag_results: list, version: str) -> dict:
     scores = {}
     for key in ["faithfulness", "answer_relevancy", "context_recall", "context_precision"]:
         raw = result[key]
-        scores[key] = float(np.mean([v for v in raw if v is not None]))
+        # Lọc bỏ cả None LẪN NaN — tránh 1 mẫu lỗi làm cả metric thành NaN
+        vals = [v for v in raw if v is not None and not (isinstance(v, float) and np.isnan(v))]
+        scores[key] = float(np.mean(vals)) if vals else float("nan")
 
     # In kết quả
     print(f"\n📊 Kết quả RAGAS — Prompt {version.upper()}:")
@@ -203,12 +225,23 @@ def main():
     if not config.validate():
         sys.exit(1)
 
-    # TODO: Tạo vectorstore
-    vectorstore = ...
+    # Tạo vectorstore
+    vectorstore = setup_vectorstore()
 
-    # Thu thập kết quả RAG cho cả V1 và V2
-    v1_results = collect_rag_outputs(vectorstore, "v1")
-    v2_results = collect_rag_outputs(vectorstore, "v2")
+    # Thu thập kết quả RAG cho cả V1 và V2 (có cache để tránh sinh lại khi re-run)
+    cache_path = Path(__file__).parent.parent / "data" / "_rag_cache.json"
+    if cache_path.exists():
+        print(f"♻️  Tải lại kết quả RAG đã cache ({cache_path.name}) — bỏ qua bước sinh.")
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        v1_results, v2_results = cached["v1"], cached["v2"]
+    else:
+        v1_results = collect_rag_outputs(vectorstore, "v1")
+        v2_results = collect_rag_outputs(vectorstore, "v2")
+        cache_path.write_text(
+            json.dumps({"v1": v1_results, "v2": v2_results}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        print(f"💾 Đã cache kết quả RAG vào {cache_path.name} (xoá file này để sinh lại).")
 
     # Chạy RAGAS evaluation
     v1_scores = run_ragas_eval(v1_results, "v1")
@@ -231,16 +264,14 @@ def main():
         print(f"\n⚠️  Chưa đạt mục tiêu ({best_faith:.4f} < 0.8).")
         print("   Gợi ý: giảm chunk_size, tăng k, hoặc điều chỉnh prompt.")
 
-    # TODO: Lưu báo cáo vào data/ragas_report.json
+    # Lưu báo cáo vào data/ragas_report.json
     report = {
         "prompt_v1_scores": v1_scores,
         "prompt_v2_scores": v2_scores,
         "target_met": best_faith >= 0.8,
     }
     report_path = Path(__file__).parent.parent / "data" / "ragas_report.json"
-    # TODO: Ghi report vào file bằng json.dumps hoặc json.dump
-    # Gợi ý: report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    ...
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"💾 Đã lưu báo cáo vào {report_path}")
 
 

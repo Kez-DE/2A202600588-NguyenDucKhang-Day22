@@ -28,3 +28,10 @@ env/
 
 # Lab outputs (không commit, chỉ nộp evidence/)
 data/ragas_report.json
+
+# Embeddings model cache (fastembed) — không commit
+.cache/
+local_cache/
+.fastembed_cache/
+**/fastembed_cache/
+data/_rag_cache.json
