@@ -9,9 +9,10 @@ Cấu hình: LLM = OpenRouter `owl-alpha` (bước 1–3) · Embeddings = FastEm
 |-----|----------|-----------|
 | `01_langsmith_traces.png`  | 1 — ≥50 traces trên LangSmith        | ✅ Đã có |
 | `02_ab_routing_log.txt`    | 2 — log A/B routing (nhãn v1/v2)     | ✅ Đã có |
-| `02_prompt_hub.png`        | 2 — 2 phiên bản prompt trên Hub      | ⬜ Cần chụp (Prompts trên apac.smith.langchain.com) |
+| `02_prompt_hub.png`        | 2 — prompt v1 trên Hub (APAC)        | ✅ Đã có |
+| `02_prompt_hub_v2.png`     | 2 — prompt v2 trên Hub (APAC)        | ✅ Đã có |
 | `03_ragas_report.json`     | 3 — báo cáo RAGAS                    | ✅ Đã có (số liệu thật) |
-| `03_ragas_scores.png`      | 3 — bảng điểm RAGAS                  | ⬜ Tùy chọn (xem số liệu trong JSON) |
+| `03_ragas_scores.png`      | 3 — bảng điểm RAGAS V1 vs V2         | ✅ Đã có |
 | `04_pii_demo_log.txt`      | 4 — demo PII detector                | ✅ Đã có |
 | `04_json_demo_log.txt`     | 4 — demo JSON formatter              | ✅ Đã có |
 
